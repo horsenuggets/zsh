@@ -5659,6 +5659,7 @@ mb_metastrlenend(char *ptr, int width, char *eptr)
     char inchar, *laststart;
     size_t ret;
     wchar_t wc;
+    wchar_t prevwc = L'\0';	/* previous wide char, for VS16 clustering */
     int num, num_in_char, complete;
 
     if (!isset(MULTIBYTE) || MB_CUR_MAX == 1)
@@ -5685,6 +5686,7 @@ mb_metastrlenend(char *ptr, int width, char *eptr)
 	    num++;
 	    laststart = ptr;
 	    num_in_char = 0;
+	    prevwc = (wchar_t)(unsigned char) inchar;
 	    continue;
 	}
 
@@ -5725,7 +5727,17 @@ mb_metastrlenend(char *ptr, int width, char *eptr)
 			num += wcw;
 		    else
 			num++;
+		} else if (width == 1 && wc == (wchar_t) 0xfe0f &&
+			   prevwc && WCWIDTH(prevwc) == 1) {
+		    /*
+		     * VS16 (gridfit-mono patch): a width-1 base followed by
+		     * U+FE0F is an emoji-presentation cluster shown 2 columns
+		     * wide.  Add the extra column so string width agrees with
+		     * ZLE's cell layout.
+		     */
+		    num++;
 		}
+		prevwc = wc;
 	    } else
 		num++;
 	    laststart = ptr;

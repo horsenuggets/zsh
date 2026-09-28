@@ -135,6 +135,39 @@ ZR_strncmp(const REFRESH_ELEMENT *oldwstr, const REFRESH_ELEMENT *newwstr,
 
 #include "zle_refresh.pro"
 
+#ifdef MULTIBYTE_SUPPORT
+/*
+ * Emoji-presentation variation sequences (gridfit-mono patch).
+ *
+ * A width-1 base codepoint immediately followed by VARIATION SELECTOR-16
+ * (U+FE0F) requests emoji presentation, which terminals in grapheme/unicode
+ * width mode display 2 columns wide (e.g. U+26A0 U+FE0F "warning" or U+2611
+ * U+FE0F "ballot box"). Plain wcwidth() sums these as base(1) + VS16(0) = 1,
+ * so ZLE lays them out in a single cell and its cursor math drifts against
+ * such a terminal.
+ *
+ * `s` points at the base of a cluster of `ichars` codepoints (base plus any
+ * combining chars ZLE has folded into the same glyph). When a folded VS16 is
+ * present on a width-1 base, report the cluster as 2 columns. Every ZLE
+ * cell-building site routes its width through this, and the on-screen cursor
+ * column is derived from that same cell layout, so display and cursor stay
+ * internally consistent. Bare bases (no VS16) keep width 1.
+ */
+static int
+vs16_cluster_width(int width, const ZLE_CHAR_T *s, int ichars)
+{
+    int i;
+
+    if (width == 1) {
+	for (i = 1; i < ichars; i++) {
+	    if (s[i] == (ZLE_CHAR_T) 0xfe0f)
+		return 2;
+	}
+    }
+    return width;
+}
+#endif /* MULTIBYTE_SUPPORT */
+
 /*
  * Expanded prompts.
  *
@@ -1300,6 +1333,7 @@ zrefresh(void)
 		}
 	    } else
 		ichars = 1;
+	    width = vs16_cluster_width(width, t, ichars);
 	    if (width > rpms.sen - rpms.s || width == 0) {
 		/*
 		 * The screen width is too small to fit even one
@@ -1444,6 +1478,7 @@ zrefresh(void)
 			    if (!IS_COMBINING(u[ichars]))
 				break;
 		    }
+		    width = vs16_cluster_width(width, u, ichars);
 		    /* Handle wide characters as above */
 		    if (width > rpms.sen - rpms.s) {
 			do {
@@ -2472,11 +2507,13 @@ singlerefresh(ZLE_STRING_T tmpline, int tmpll, int tmpcs)
 	    vsiz = (vsiz | 7) + 2;
 #ifdef MULTIBYTE_SUPPORT
 	else if (WC_ISPRINT(tmpline[t0]) && ((width = WCWIDTH(tmpline[t0])) > 0)) {
-	    vsiz += width;
 	    if (isset(COMBININGCHARS) && IS_BASECHAR(tmpline[t0])) {
+		int cstart = t0;
 		while (t0 < tmpll-1 && IS_COMBINING(tmpline[t0+1]))
 		    t0++;
+		width = vs16_cluster_width(width, tmpline+cstart, t0 - cstart + 1);
 	    }
+	    vsiz += width;
 	}
 #endif
 	else if (ZC_icntrl(tmpline[t0])
@@ -2563,6 +2600,7 @@ singlerefresh(ZLE_STRING_T tmpline, int tmpll, int tmpcs)
 		}
 	    } else
 		ichars = 1;
+	    width = vs16_cluster_width(width, tmpline+t0, ichars);
 	    vp->atr = base_attr;
 	    if (ichars > 1)
 		addmultiword(vp, tmpline+t0, ichars);
