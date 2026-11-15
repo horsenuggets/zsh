@@ -156,3 +156,8 @@ Src/Zle/zle_widget.h
 Test/*.tmp
 /.project
 .DS_Store
+
+# Terraform
+.terraform/
+*.tfstate
+*.tfstate.*
